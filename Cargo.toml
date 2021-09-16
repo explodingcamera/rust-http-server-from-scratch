@@ -8,3 +8,11 @@ version = "0.1.0"
 [dependencies]
 anyhow = "1.0"
 socket2 = "0.4.1"
+
+[[bin]]
+name = "client"
+path = "src/bin/client.rs"
+
+[[bin]]
+name = "server"
+path = "src/bin/server.rs"

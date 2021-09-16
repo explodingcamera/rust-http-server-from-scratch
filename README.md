@@ -1,6 +1,6 @@
 # Creating a Webserver from scratch (in rust)
 
-# Getting Started¶
+# Getting Started
 
 ## 1. Install Dependencies
 
@@ -9,5 +9,6 @@
 ## 2. Run
 
 ```bash
-$ cargo run
+$ cargo run --bin client
+$ cargo run --bin server
 ```
