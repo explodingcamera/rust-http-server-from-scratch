@@ -33,13 +33,13 @@ fn process_request(mut socket: TcpStream, addr: SocketAddr) -> Result<()> {
     let mut buffer = [0; 30000];
     socket.read(&mut buffer[..])?;
 
-    let req = std::str::from_utf8(&buffer[..])?;
+    let _req = std::str::from_utf8(&buffer[..])?;
     // println!("Got Request:\n\n{}", req);
 
-    let response = http_response::ResponseBuilder::default();
+    let mut response = http_response::ResponseBuilder::default();
+    response.write(b"tee");
 
     // write
-    std::io::stdout().write(&response.build())?;
     socket.write(&response.build())?;
 
     Ok(())
