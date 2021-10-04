@@ -1,5 +1,9 @@
 use anyhow::Result;
-use webserver_from_scratch::start_server;
+use tokio::runtime;
+use webserver_from_scratch::HTTPServer;
+
 fn main() -> Result<()> {
-    start_server()
+    let server = HTTPServer::new();
+    let rt = runtime::Runtime::new()?;
+    rt.block_on(server.listen("[::1]:8080".parse().unwrap()))
 }
