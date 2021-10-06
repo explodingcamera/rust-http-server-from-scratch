@@ -1,7 +1,7 @@
 /// Determines if byte is a token char
 /// !, #, $, %, &, ', * +, -, ., ^, _, `, |, ~, digits, alphanumeric
 pub fn is_token(b: u8) -> bool {
-    b > b'_' && b < 0x7f
+    b > 0x1f && b < 0x7f
 }
 
 // ASCII codes to accept as part of URI strings
