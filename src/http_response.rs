@@ -106,4 +106,14 @@ mod tests {
             b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: text/plain\r\nx-some-test-header: some-value\r\n\r\nhi"
         )
     }
+
+    #[test]
+    fn empty_response() {
+        let response = ResponseBuilder::new();
+        println!("{}", std::str::from_utf8(&response.build()).unwrap());
+        assert_eq!(
+            response.build(),
+            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nContent-Type: text/plain\r\n\r\n"
+        )
+    }
 }
