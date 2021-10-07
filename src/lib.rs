@@ -7,6 +7,7 @@ use thiserror::Error;
 
 // TODO: tokio is temporary and will be replaced by a custom implementation
 use tokio;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 pub use httpstatus::{StatusClass, StatusCode};
@@ -74,14 +75,15 @@ impl HTTPServer {
     }
 
     // process incoming sockets
-    async fn process_request(socket: TcpStream, _addr: SocketAddr) -> Result<()> {
+    async fn process_request(mut socket: TcpStream, _addr: SocketAddr) -> Result<()> {
         // println!("received request from {}", addr);
 
         // read
         // NOTE: readable might give a false positive, maybe add retry logic in the future
         socket.readable().await?;
         let mut buffer = BytesMut::with_capacity(REQUEST_BUFFER_SIZE);
-        let request_length = socket.try_read_buf(&mut buffer)?;
+
+        let request_length = socket.read_buf(&mut buffer).await?;
 
         println!("got request:\n  length: {}", request_length);
 
@@ -104,7 +106,7 @@ impl HTTPServer {
         // write
         socket.writable().await?;
         let response = response.build();
-        socket.try_write(&response)?;
+        socket.write_all(&response).await?;
 
         Ok(())
     }
