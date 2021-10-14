@@ -1,13 +1,13 @@
 use anyhow::Result;
-use bytes::{Bytes, BytesMut};
+use bytes::{Bytes, BytesMut}; // helpers for zero-copy
 use socket2::{Domain, Socket, Type};
 use std::net::SocketAddr;
 use std::time::Duration;
 use thiserror::Error;
 
-// TODO: tokio is temporary and will be replaced by a custom implementation
+// TODO: tokio is temporary and will be replaced by a custom implementation late on
 use tokio;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt}; // this implements async operations on buffers
 use tokio::net::{TcpListener, TcpStream};
 
 pub use httpstatus::{StatusClass, StatusCode};
@@ -15,6 +15,8 @@ pub use httpstatus::{StatusClass, StatusCode};
 pub mod http_request;
 pub mod http_response;
 pub mod tokens;
+
+// https://locust.io/
 
 const REQUEST_BUFFER_SIZE: usize = 30000;
 
@@ -51,15 +53,18 @@ impl HTTPServer {
         socket.bind(&address.into())?;
         socket.listen(128)?;
 
-        // We convert the socket into a tokio::net::TcpListener which includes a handy way to check if a socket is ready (since we use non blocking sockets).
-        // This is only temporary and will be later replaced by a custom implementation
+        // We convert the socket into a tokio::net::TcpListener, since this
+        // includes a handy way to check if a socket is ready (since we use non blocking sockets)
+        // and async functions for reading from/writing to a socket (since we use non-blocking green threads).
+        //
+        // This reliance on tokio is mostly temporary and will be later replaced by a custom implementation
         let listener = TcpListener::from_std(socket.into())?;
 
         println!("started server on {}", address);
         loop {
             match listener.accept().await {
                 Ok((socket, addr)) => {
-                    // Spawn a new task for each request
+                    // Spawn a new non-blocking, multithreaded task for each request
                     // (A task is essentially a green thread)
                     tokio::spawn(async move {
                         Self::process_request(socket, addr)
@@ -78,14 +83,17 @@ impl HTTPServer {
     async fn process_request(mut socket: TcpStream, _addr: SocketAddr) -> Result<()> {
         // println!("received request from {}", addr);
 
-        // read
+        // read request
         // NOTE: readable might give a false positive, maybe add retry logic in the future
         socket.readable().await?;
         let mut buffer = BytesMut::with_capacity(REQUEST_BUFFER_SIZE);
 
         let request_length = socket.read_buf(&mut buffer).await?;
-
         println!("got request:\n  length: {}", request_length);
+        // println!(
+        //     "got request:\n",
+        //     String::from_utf8(buffer.clone().to_vec()).expect("should parse")
+        // );
 
         // parse requests
         let mut request = http_request::Request::new();
@@ -98,12 +106,20 @@ impl HTTPServer {
             request.version.unwrap()
         );
 
+        for (header, value) in request.headers.iter() {
+            println!(
+                "  header: name=`{}` value=`{}`",
+                header,
+                String::from_utf8(value.to_vec()).expect("header to be string")
+            );
+        }
+
         // build response
         let mut response = http_response::ResponseBuilder::default();
         response.set_header("x-powered-by", "webserver-from-scratch");
         response.write(b"hello world");
 
-        // write
+        // write response
         socket.writable().await?;
         let response = response.build();
         socket.write_all(&response).await?;

@@ -1,5 +1,5 @@
 use bytes::{Buf, Bytes};
-use std::collections::BTreeMap;
+use std::collections::{btree_map, BTreeMap};
 use thiserror::Error;
 
 use crate::tokens;
@@ -14,8 +14,10 @@ pub enum RequestError {
     Status,
     #[error("invalid version")]
     Version,
-    #[error("invalid newline")]
+    #[error("expected newline")]
     NewLine,
+    #[error("expected space")]
+    Space,
     #[error("invalid token")]
     Token,
     #[error("invalid uri")]
@@ -25,12 +27,36 @@ pub enum RequestError {
 }
 
 #[derive(Debug)]
-pub struct Headers<'a> {
-    headers: BTreeMap<&'a str, &'a [u8]>,
+pub struct Headers {
+    headers: BTreeMap<String, Vec<u8>>,
 }
 
+impl Headers {
+    pub fn iter(&self) -> btree_map::Iter<String, Vec<u8>> {
+        self.headers.iter()
+    }
+}
+
+// GET / HTTP/1.1
+// Host: localhost:8080
+// Connection: keep-alive
+// sec-ch-ua: "Chromium";v="94", "Google Chrome";v="94", ";Not A Brand";v="99"
+// sec-ch-ua-mobile: ?0
+// sec-ch-ua-platform: "Linux"
+// DNT: 1
+// Upgrade-Insecure-Requests: 1
+// User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.81 Safari/537.36
+// Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9
+// Sec-Fetch-Site: none
+// Sec-Fetch-Mode: navigate
+// Sec-Fetch-User: ?1
+// Sec-Fetch-Dest: document
+// Accept-Encoding: gzip, deflate, br
+// Accept-Language: en-DE,en;q=0.9,de-DE;q=0.8,de;q=0.7,en-US;q=0.6
+// Cookie: consent=allow
+
 #[derive(Debug)]
-pub struct Request<'a> {
+pub struct Request {
     /// The request method, such as `GET`.
     pub method: Option<String>,
     /// The request path, such as `/about-us`.
@@ -38,10 +64,10 @@ pub struct Request<'a> {
     /// The request version, such as `HTTP/1.1`.
     pub version: Option<u8>,
     /// The request headers.
-    pub headers: Headers<'a>,
+    pub headers: Headers,
 }
 
-impl<'a> Request<'a> {
+impl Request {
     // Creates a new Request
     pub fn new() -> Self {
         Request {
@@ -61,15 +87,38 @@ impl<'a> Request<'a> {
         self.version = Some(Request::parse_version(&mut bytes)?);
         Request::parse_new_line(&mut bytes)?;
         Request::parse_headers(&mut bytes, &mut self.headers)?;
+        Ok(())
+    }
+
+    pub fn parse_headers(bytes: &mut Bytes, headers: &mut Headers) -> Result<(), RequestError> {
+        let mut parse_header = || -> Result<(), RequestError> {
+            let header_name = Request::parse_header_name(bytes)?;
+            Request::parse_space(bytes)?;
+            let header_value = Request::parse_header_value(bytes)?;
+
+            headers.headers.insert(header_name, header_value);
+            Ok(())
+        };
+
+        loop {
+            if parse_header().is_err() {
+                break;
+            }
+        }
 
         Ok(())
     }
 
-    pub fn parse_headers(
-        _bytes: &mut Bytes,
-        _headers: &'a mut Headers,
-    ) -> Result<(), RequestError> {
-        Ok(())
+    pub fn parse_space(bytes: &mut Bytes) -> Result<(), RequestError> {
+        if !bytes.has_remaining() {
+            return Err(RequestError::NewLine);
+        }
+
+        if bytes.get_u8() == b' ' && bytes.has_remaining() {
+            Ok(())
+        } else {
+            Err(RequestError::Space)
+        }
     }
 
     pub fn parse_new_line(bytes: &mut Bytes) -> Result<(), RequestError> {
@@ -79,12 +128,9 @@ impl<'a> Request<'a> {
 
         match bytes.get_u8() {
             b'\r' => {
-                print!("1");
                 if bytes.has_remaining() && bytes.get_u8() == b'\n' {
-                    print!("2");
                     Ok(())
                 } else {
-                    print!("3");
                     Err(RequestError::NewLine)
                 }
             }
@@ -127,7 +173,35 @@ impl<'a> Request<'a> {
                     .map_err(|_| RequestError::Token)?
                     .to_string());
             } else if !tokens::is_token(*b) {
-                println!("{}", b);
+                break;
+            }
+        }
+        return Err(RequestError::Token);
+    }
+
+    pub fn parse_header_name(bytes: &mut Bytes) -> Result<String, RequestError> {
+        for (i, b) in bytes.iter().enumerate() {
+            if b == &b':' {
+                let token = &bytes.slice(0..i)[..];
+                bytes.advance(i + 1);
+                return Ok(std::str::from_utf8(&token)
+                    .map_err(|_| RequestError::Token)?
+                    .to_string());
+            } else if !tokens::is_header_name_token(*b) {
+                break;
+            }
+        }
+        return Err(RequestError::Token);
+    }
+
+    pub fn parse_header_value(bytes: &mut Bytes) -> Result<Vec<u8>, RequestError> {
+        for (i, b) in bytes.iter().enumerate() {
+            if b == &b'\r' || b == &b'\n' {
+                let token = &bytes.slice(0..i)[..];
+                bytes.advance(i);
+                Request::parse_new_line(bytes)?;
+                return Ok(token.to_vec());
+            } else if !tokens::is_header_value_token(*b) {
                 break;
             }
         }
