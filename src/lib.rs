@@ -91,7 +91,7 @@ impl HTTPServer {
         let request_length = socket.read_buf(&mut buffer).await?;
         println!("got request:\n  length: {}", request_length);
         // println!(
-        //     "got request:\n",
+        //     "got request:\n {}",
         //     String::from_utf8(buffer.clone().to_vec()).expect("should parse")
         // );
 
@@ -111,6 +111,13 @@ impl HTTPServer {
                 "  header: name=`{}` value=`{}`",
                 header,
                 String::from_utf8(value.to_vec()).expect("header to be string")
+            );
+        }
+
+        if !request.body.is_empty() {
+            println!(
+                "  body: {}",
+                String::from_utf8(request.body).unwrap_or("(not valid utf8)".to_string())
             );
         }
 

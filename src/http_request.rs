@@ -65,6 +65,8 @@ pub struct Request {
     pub version: Option<u8>,
     /// The request headers.
     pub headers: Headers,
+    /// The request body.
+    pub body: Vec<u8>,
 }
 
 impl Request {
@@ -77,6 +79,7 @@ impl Request {
             headers: Headers {
                 headers: BTreeMap::new(),
             },
+            body: vec![],
         }
     }
 
@@ -87,6 +90,12 @@ impl Request {
         self.version = Some(Request::parse_version(&mut bytes)?);
         Request::parse_new_line(&mut bytes)?;
         Request::parse_headers(&mut bytes, &mut self.headers)?;
+        Request::parse_new_line(&mut bytes)?;
+
+        if bytes.remaining() != 0 {
+            self.body = bytes.to_vec();
+        }
+
         Ok(())
     }
 
