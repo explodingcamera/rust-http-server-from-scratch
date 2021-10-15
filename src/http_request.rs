@@ -1,11 +1,17 @@
 use bytes::{Buf, Bytes};
-use std::collections::{btree_map, BTreeMap};
+use std::{
+    collections::{btree_map, BTreeMap},
+    convert::{TryFrom, TryInto},
+    fmt::{self, Debug},
+};
 use thiserror::Error;
 
 use crate::tokens;
 
 #[derive(Error, Debug)]
 pub enum RequestError {
+    #[error("invalid method")]
+    Method,
     #[error("invalid header name")]
     HeaderName,
     #[error("invalid header value")]
@@ -37,28 +43,47 @@ impl Headers {
     }
 }
 
-// GET / HTTP/1.1
-// Host: localhost:8080
-// Connection: keep-alive
-// sec-ch-ua: "Chromium";v="94", "Google Chrome";v="94", ";Not A Brand";v="99"
-// sec-ch-ua-mobile: ?0
-// sec-ch-ua-platform: "Linux"
-// DNT: 1
-// Upgrade-Insecure-Requests: 1
-// User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.81 Safari/537.36
-// Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9
-// Sec-Fetch-Site: none
-// Sec-Fetch-Mode: navigate
-// Sec-Fetch-User: ?1
-// Sec-Fetch-Dest: document
-// Accept-Encoding: gzip, deflate, br
-// Accept-Language: en-DE,en;q=0.9,de-DE;q=0.8,de;q=0.7,en-US;q=0.6
-// Cookie: consent=allow
+#[derive(Debug, PartialEq)]
+pub enum Method {
+    GET,
+    HEAD,
+    POST,
+    PUT,
+    DELETE,
+    CONNECT,
+    OPTIONS,
+    TRACE,
+    PATCH,
+}
+
+impl fmt::Display for Method {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl TryFrom<&str> for Method {
+    type Error = &'static str;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value.to_ascii_uppercase().as_str() {
+            "GET" => Ok(Method::GET),
+            "HEAD" => Ok(Method::HEAD),
+            "POST" => Ok(Method::POST),
+            "PUT" => Ok(Method::PUT),
+            "DELETE" => Ok(Method::DELETE),
+            "CONNECT" => Ok(Method::CONNECT),
+            "OPTIONS" => Ok(Method::OPTIONS),
+            "TRACE" => Ok(Method::TRACE),
+            "PATCH" => Ok(Method::PATCH),
+            _ => Err("invalid method"),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Request {
     /// The request method, such as `GET`.
-    pub method: Option<String>,
+    pub method: Option<Method>,
     /// The request path, such as `/about-us`.
     pub path: Option<String>,
     /// The request version, such as `HTTP/1.1`.
@@ -85,9 +110,17 @@ impl Request {
 
     pub fn parse(&mut self, buf: Bytes) -> Result<(), RequestError> {
         let mut bytes = Bytes::from(buf);
-        self.method = Some(Request::parse_token(&mut bytes)?);
+
+        self.method = Some(
+            Request::parse_token(&mut bytes)?
+                .as_str()
+                .try_into()
+                .map_err(|_| RequestError::Method)?,
+        );
+
         self.path = Some(Request::parse_uri(&mut bytes)?);
         self.version = Some(Request::parse_version(&mut bytes)?);
+
         Request::parse_new_line(&mut bytes)?;
         Request::parse_headers(&mut bytes, &mut self.headers)?;
         Request::parse_new_line(&mut bytes)?;
@@ -231,7 +264,7 @@ mod tests {
             .expect("parsing request");
 
         assert_eq!(request.version, Some(1));
-        assert_eq!(request.method, Some(String::from("GET")));
+        assert_eq!(request.method, Some(Method::GET));
         assert_eq!(request.path, Some(String::from("/test")));
     }
 
@@ -244,7 +277,7 @@ mod tests {
             .expect("parsing request");
 
         assert_eq!(request.version, Some(1));
-        assert_eq!(request.method, Some(String::from("GET")));
+        assert_eq!(request.method, Some(Method::GET));
         assert_eq!(request.path, Some(String::from("/test")));
     }
 

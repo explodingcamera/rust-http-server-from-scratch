@@ -1,5 +1,7 @@
 use anyhow::Result;
-use bytes::{Bytes, BytesMut}; // helpers for zero-copy
+use bytes::{Bytes, BytesMut};
+use http_request::{Method, Request};
+// helpers for zero-copy
 use socket2::{Domain, Socket, Type};
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -24,11 +26,77 @@ const REQUEST_BUFFER_SIZE: usize = 30000;
 pub enum ServerError {}
 
 #[derive(Default, Debug)]
-pub struct HTTPServer {}
+pub struct HTTPServer {
+    routes: Vec<Route>,
+}
+
+#[derive(Debug)]
+pub struct Route {
+    method: Method,
+    path: String,
+}
+
+pub struct Context {
+    pub request: Request,
+}
+
+pub type RequestHandler<'a> = &'a dyn FnMut(String) -> String;
+
+trait Router<'a> {
+    fn get(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
+    fn head(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
+    fn post(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
+    fn put(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
+    fn delete(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
+    fn connect(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
+    fn options(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
+    fn trace(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
+    fn patch(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
+    fn handle(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
+}
+
+trait HTTPFramework<'a>: Router<'a> {}
+
+impl<'a> HTTPFramework<'a> for HTTPServer {}
+
+impl<'a> Router<'a> for HTTPServer {
+    fn get(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
+        unimplemented!()
+    }
+    fn head(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
+        unimplemented!()
+    }
+    fn post(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
+        unimplemented!()
+    }
+    fn put(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
+        unimplemented!()
+    }
+    fn delete(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
+        unimplemented!()
+    }
+    fn connect(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
+        unimplemented!()
+    }
+    fn options(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
+        unimplemented!()
+    }
+    fn trace(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
+        unimplemented!()
+    }
+    fn patch(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
+        unimplemented!()
+    }
+    fn handle(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
+        unimplemented!()
+    }
+}
 
 impl HTTPServer {
     pub fn new() -> Self {
-        HTTPServer {}
+        HTTPServer {
+            ..Default::default()
+        }
     }
 
     // start listening on a new socket/port
