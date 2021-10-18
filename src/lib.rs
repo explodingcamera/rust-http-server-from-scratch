@@ -1,10 +1,12 @@
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
-use http_request::{Method, Request};
+use router::{Route, Router};
 // helpers for zero-copy
 use socket2::{Domain, Socket, Type};
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
+use std::vec;
 use thiserror::Error;
 
 // TODO: tokio is temporary and will be replaced by a custom implementation late on
@@ -16,86 +18,24 @@ pub use httpstatus::{StatusClass, StatusCode};
 
 pub mod http_request;
 pub mod http_response;
+pub mod router;
 pub mod tokens;
-
-// https://locust.io/
 
 const REQUEST_BUFFER_SIZE: usize = 30000;
 
 #[derive(Error, Debug)]
 pub enum ServerError {}
 
-#[derive(Default, Debug)]
-pub struct HTTPServer {
-    routes: Vec<Route>,
+pub struct HTTPServer<D: Send + 'static + Sync> {
+    routes: Arc<Vec<Route>>,
 }
 
-#[derive(Debug)]
-pub struct Route {
-    method: Method,
-    path: String,
-}
-
-pub struct Context {
-    pub request: Request,
-}
-
-pub type RequestHandler<'a> = &'a dyn FnMut(String) -> String;
-
-trait Router<'a> {
-    fn get(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
-    fn head(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
-    fn post(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
-    fn put(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
-    fn delete(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
-    fn connect(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
-    fn options(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
-    fn trace(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
-    fn patch(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
-    fn handle(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self;
-}
-
-trait HTTPFramework<'a>: Router<'a> {}
-
-impl<'a> HTTPFramework<'a> for HTTPServer {}
-
-impl<'a> Router<'a> for HTTPServer {
-    fn get(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
-        unimplemented!()
-    }
-    fn head(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
-        unimplemented!()
-    }
-    fn post(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
-        unimplemented!()
-    }
-    fn put(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
-        unimplemented!()
-    }
-    fn delete(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
-        unimplemented!()
-    }
-    fn connect(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
-        unimplemented!()
-    }
-    fn options(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
-        unimplemented!()
-    }
-    fn trace(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
-        unimplemented!()
-    }
-    fn patch(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
-        unimplemented!()
-    }
-    fn handle(&mut self, path: String, handler: RequestHandler<'a>) -> &mut Self {
-        unimplemented!()
-    }
-}
-
-impl HTTPServer {
+trait HTTPFramework<D: Sync + Send + 'static>: Router<D> {}
+impl<D: Sync + Send + 'static> HTTPFramework<D> for HTTPServer<D> {}
+impl<D: Sync + Send + 'static> HTTPServer<D> {
     pub fn new() -> Self {
         HTTPServer {
-            ..Default::default()
+            routes: Arc::new(vec![]),
         }
     }
 
@@ -134,8 +74,9 @@ impl HTTPServer {
                 Ok((socket, addr)) => {
                     // Spawn a new non-blocking, multithreaded task for each request
                     // (A task is essentially a green thread)
-                    tokio::spawn(async move {
-                        Self::process_request(socket, addr)
+
+                    tokio::spawn(async {
+                        HTTPServer::process_request(self.routes, socket)
                             .await
                             .unwrap_or_else(|e| {
                                 println!("{}", e);
@@ -148,7 +89,7 @@ impl HTTPServer {
     }
 
     // process incoming sockets
-    async fn process_request(mut socket: TcpStream, _addr: SocketAddr) -> Result<()> {
+    async fn process_request(routes: Arc<Vec<Route>>, mut socket: TcpStream) -> Result<()> {
         // println!("received request from {}", addr);
 
         // read request
@@ -158,10 +99,6 @@ impl HTTPServer {
 
         let request_length = socket.read_buf(&mut buffer).await?;
         println!("got request:\n  length: {}", request_length);
-        // println!(
-        //     "got request:\n {}",
-        //     String::from_utf8(buffer.clone().to_vec()).expect("should parse")
-        // );
 
         // parse requests
         let mut request = http_request::Request::new();
@@ -188,6 +125,9 @@ impl HTTPServer {
                 String::from_utf8(request.body).unwrap_or("(not valid utf8)".to_string())
             );
         }
+
+        // for middleware in self.
+        // middleware_matches_request
 
         // build response
         let mut response = http_response::ResponseBuilder::default();
