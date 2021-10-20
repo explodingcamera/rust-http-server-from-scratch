@@ -1,8 +1,6 @@
 use anyhow::Result;
 use webserver_from_scratch::{http_request::Method, router::Router, HTTPServer, StatusCode};
 
-// TODO: fix routing
-
 fn main() -> Result<()> {
     let mut server = HTTPServer::new();
 
