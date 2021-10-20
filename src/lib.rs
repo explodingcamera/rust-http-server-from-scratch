@@ -44,7 +44,7 @@ pub struct HTTPServer {
 
 struct NewRequest {
     pub request: Arc<Request>,
-    pub handlers: Vec<(Route, Option<RequestPath>)>,
+    pub handlers: Vec<(Route, RequestPath)>,
     pub resp: oneshot::Sender<Result<Vec<u8>>>,
 }
 
@@ -156,6 +156,10 @@ impl HTTPServer {
 
                             if let Some(handler) = self.handlers.get_mut(&route.handler) {
                                 handler(&mut ctx);
+
+                                if ctx.has_ended() {
+                                    break;
+                                }
                                 continue;
                             }
                             err = true;
@@ -222,10 +226,19 @@ impl HTTPServer {
         }
 
         // for middleware in self
-        let mut apply_middlewares: Vec<(Route, Option<RequestPath>)> = vec![];
+        let mut apply_middlewares: Vec<(Route, RequestPath)> = vec![];
         for route in routes.iter() {
+            if !route.method.is_none() && route.method != request.method {
+                continue;
+            }
+
             match middleware_matches_request(&request, route) {
-                Ok(request_path) => apply_middlewares.push((route.to_owned(), request_path)),
+                Ok(request_path) => {
+                    println!("{}", route.path);
+                    if let Some(request_path) = request_path {
+                        apply_middlewares.push((route.to_owned(), request_path))
+                    }
+                }
                 Err(_) => {}
             }
         }

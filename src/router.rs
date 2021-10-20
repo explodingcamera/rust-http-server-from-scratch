@@ -14,10 +14,23 @@ use crate::{
 pub struct MiddlewareContext {
     pub request: Arc<Request>,
     pub response: ResponseBuilder,
+    ended: bool,
 }
+
 impl MiddlewareContext {
     pub fn new(request: Arc<Request>, response: ResponseBuilder) -> Self {
-        Self { request, response }
+        Self {
+            request,
+            response,
+            ended: false,
+        }
+    }
+    pub fn end(&mut self) {
+        self.ended = true
+    }
+
+    pub fn has_ended(&self) -> bool {
+        self.ended
     }
 }
 
@@ -32,6 +45,7 @@ pub type Handler = Box<dyn FnMut(&mut MiddlewareContext)>;
 
 pub trait Router {
     fn handle(&mut self, method: Method, path: &str, handler: Handler) -> &mut Self;
+    fn any(&mut self, path: &str, handler: Handler) -> &mut Self;
 
     // fn get(&mut self, path: String, handler: &dyn MiddlewareT<D>) -> &mut Self;
     // fn head(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self;
@@ -47,14 +61,14 @@ pub trait Router {
 
 #[derive(Debug)]
 pub struct RequestPath {
-    path: String,
-    params: Vec<RequestPathParams>,
+    pub path: String,
+    pub params: Vec<RequestPathParams>,
 }
 
 #[derive(Debug)]
 pub struct RequestPathParams {
-    param: String,
-    value: String,
+    pub param: String,
+    pub value: String,
 }
 
 pub fn middleware_matches_request(request: &Request, route: &Route) -> Result<Option<RequestPath>> {
@@ -118,6 +132,18 @@ impl Router for HTTPServer {
             path: path.to_string(),
             handler: self.handler_count,
             method: Some(method),
+        };
+        self.add_handler(self.handler_count, handler);
+        self.add_route(route);
+        self
+    }
+
+    fn any(&mut self, path: &str, handler: Handler) -> &mut Self {
+        self.handler_count += 1;
+        let route = Route {
+            path: path.to_string(),
+            handler: self.handler_count,
+            method: None,
         };
         self.add_handler(self.handler_count, handler);
         self.add_route(route);
