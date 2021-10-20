@@ -1,6 +1,3 @@
-#![feature(type_alias_impl_trait)]
-#![feature(fn_traits)]
-
 use anyhow::{anyhow, Result};
 use bytes::{Bytes, BytesMut};
 use futures::channel::mpsc;
@@ -158,7 +155,7 @@ impl HTTPServer {
                             // TODO: add route and request_path to the context
 
                             if let Some(handler) = self.handlers.get_mut(&route.handler) {
-                                handler();
+                                handler(&mut ctx);
                                 continue;
                             }
                             err = true;

@@ -28,7 +28,7 @@ pub struct Route {
     pub handler: u64,
 }
 
-pub type Handler = Box<dyn FnMut(&mut MiddlewareContext) -> Pin<Box<dyn Future<Output = ()>>>>;
+pub type Handler = Box<dyn FnMut(&mut MiddlewareContext)>;
 
 pub trait Router {
     fn handle(&mut self, method: Method, path: &str, handler: Handler) -> &mut Self;

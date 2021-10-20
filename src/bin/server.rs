@@ -6,10 +6,14 @@ use webserver_from_scratch::{http_request::Method, router::Router, HTTPServer};
 fn main() -> Result<()> {
     let mut server = HTTPServer::new();
 
-    let server = server.handle(Method::GET, "/", |ctx| async {
-        let resp = b"Hello World! :)";
-        ctx.response.write(resp);
-    });
+    let server = server.handle(
+        Method::GET,
+        "/",
+        Box::new(|ctx| {
+            let resp = b"Hello World! :)";
+            ctx.response.write(resp);
+        }),
+    );
 
     server.listen_blocking("[::1]:8080".parse().unwrap())
 }
