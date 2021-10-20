@@ -40,12 +40,23 @@ pub struct HTTPServer {
     handlers: HashMap<u64, Handler>,
     routes_mut: Vec<Route>,
     routes: Arc<Vec<Route>>,
+
+    loglevel: LogLevel,
 }
 
 struct NewRequest {
     pub request: Arc<Request>,
     pub handlers: Vec<(Route, RequestPath)>,
     pub resp: oneshot::Sender<Result<Vec<u8>>>,
+}
+
+#[repr(usize)]
+#[derive(Clone)]
+pub enum LogLevel {
+    Off = 1,
+    Debug,
+    Normal,
+    Critical,
 }
 
 trait HTTPFramework: Router {}
@@ -57,6 +68,7 @@ impl HTTPServer {
             handlers: HashMap::with_capacity(100),
             routes: Arc::new(vec![]),
             routes_mut: Vec::with_capacity(100),
+            loglevel: LogLevel::Off,
         }
     }
 
@@ -72,6 +84,11 @@ impl HTTPServer {
     pub fn listen_blocking(&mut self, address: SocketAddr) -> Result<()> {
         let rt = runtime::Runtime::new()?;
         rt.block_on(self.listen(address))
+    }
+
+    pub fn loglevel(&mut self, loglevel: LogLevel) -> &mut Self {
+        self.loglevel = loglevel;
+        self
     }
 
     async fn listen(&mut self, address: SocketAddr) -> Result<()> {
@@ -117,6 +134,8 @@ impl HTTPServer {
         // -> The correct middlewares are called and a respons is build
         // -> -> The thread then returns the body to it's client
         let routes = self.routes.clone();
+        let loglevel = self.loglevel.clone();
+
         tokio::spawn(async move {
             loop {
                 match listener.accept().await {
@@ -124,11 +143,12 @@ impl HTTPServer {
                         // Spawn a new non-blocking, multithreaded task for each request
                         // (A task is essentially a green thread)
 
+                        let loglevel = loglevel.clone();
                         let routes = routes.clone();
                         let tx = tx.clone();
 
                         tokio::spawn(async move {
-                            HTTPServer::process_request(routes, socket, addr, tx)
+                            HTTPServer::process_request(routes, socket, addr, tx, loglevel)
                                 .await
                                 .unwrap_or_else(|e| {
                                     println!("{}", e);
@@ -151,8 +171,8 @@ impl HTTPServer {
                         let mut ctx = MiddlewareContext::new(req.request.clone(), response);
 
                         let mut err = false;
-                        for (route, _request_path) in req.handlers.iter() {
-                            // TODO: add route and request_path to the context
+                        for (route, request_path) in req.handlers.iter() {
+                            ctx.params = request_path.params.clone();
 
                             if let Some(handler) = self.handlers.get_mut(&route.handler) {
                                 handler(&mut ctx);
@@ -187,8 +207,9 @@ impl HTTPServer {
         mut socket: TcpStream,
         _addr: SocketAddr,
         mut tx: mpsc::Sender<NewRequest>,
+        loglevel: LogLevel,
     ) -> Result<()> {
-        // println!("received request from {}", addr);
+        let loglevel = loglevel as usize;
 
         // read request
         // NOTE: readable might give a false positive, maybe add retry logic in the future
@@ -196,33 +217,39 @@ impl HTTPServer {
         let mut buffer = BytesMut::with_capacity(REQUEST_BUFFER_SIZE);
 
         let request_length = socket.read_buf(&mut buffer).await?;
-        println!("got request:\n  length: {}", request_length);
+
+        if loglevel > 1 {
+            println!("got request:\n  length: {}", request_length);
+        }
 
         // parse requests
         let mut request = http_request::Request::new();
         request.parse(Bytes::from(buffer))?;
         let request = Arc::new(request);
 
-        println!(
-            "  method: {}\n  path: {}\n  version: HTTP/1.{}",
-            request.method.clone().unwrap(),
-            request.path.clone().unwrap(),
-            request.version.clone().unwrap()
-        );
-
-        for (header, value) in request.headers.iter() {
+        if loglevel > 1 {
             println!(
-                "  header: name=`{}` value=`{}`",
-                header,
-                String::from_utf8(value.to_vec()).expect("header to be string")
+                "  method: {}\n  path: {}\n  version: HTTP/1.{}",
+                request.method.clone().unwrap(),
+                request.path.clone().unwrap(),
+                request.version.clone().unwrap()
             );
-        }
 
-        if !request.body.is_empty() {
-            println!(
-                "  body: {}",
-                String::from_utf8(request.body.clone()).unwrap_or("(not valid utf8)".to_string())
-            );
+            for (header, value) in request.headers.iter() {
+                println!(
+                    "  header: name=`{}` value=`{}`",
+                    header,
+                    String::from_utf8(value.to_vec()).expect("header to be string")
+                );
+            }
+
+            if !request.body.is_empty() {
+                println!(
+                    "  body: {}",
+                    String::from_utf8(request.body.clone())
+                        .unwrap_or("(not valid utf8)".to_string())
+                );
+            }
         }
 
         // for middleware in self
@@ -234,7 +261,9 @@ impl HTTPServer {
 
             match middleware_matches_request(&request, route) {
                 Ok(request_path) => {
-                    println!("{}", route.path);
+                    if loglevel > 1 {
+                        println!("  path: {}", route.path);
+                    }
                     if let Some(request_path) = request_path {
                         apply_middlewares.push((route.to_owned(), request_path))
                     }
@@ -242,8 +271,6 @@ impl HTTPServer {
                 Err(_) => {}
             }
         }
-
-        println!("{:?}", apply_middlewares);
 
         let (resp_tx, resp_rx) = oneshot::channel();
         tx.try_send(NewRequest {

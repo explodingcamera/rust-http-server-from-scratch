@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use anyhow::Result;
 
@@ -11,8 +11,16 @@ use crate::{
 };
 
 pub struct MiddlewareContext {
+    /// Current request
     pub request: Arc<Request>,
+
+    /// Response builder
     pub response: ResponseBuilder,
+
+    /// Params
+    pub params: BTreeMap<String, RequestPathParams>,
+
+    /// End the request prematurely
     ended: bool,
 }
 
@@ -22,6 +30,7 @@ impl MiddlewareContext {
             request,
             response,
             ended: false,
+            params: BTreeMap::new(),
         }
     }
     pub fn end(&mut self) {
@@ -45,26 +54,24 @@ pub type Handler = Box<dyn FnMut(&mut MiddlewareContext)>;
 pub trait Router {
     fn handle(&mut self, method: Method, path: &str, handler: Handler) -> &mut Self;
     fn any(&mut self, path: &str, handler: Handler) -> &mut Self;
-
-    // fn get(&mut self, path: String, handler: &dyn MiddlewareT<D>) -> &mut Self;
-    // fn head(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self;
-    // fn post(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self;
-    // fn put(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self;
-    // fn delete(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self;
-    // fn connect(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self;
-    // fn options(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self;
-    // fn trace(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self;
-    // fn patch(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self;
-    // fn any(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self;
+    fn get(&mut self, path: &str, handler: Handler) -> &mut Self;
+    fn head(&mut self, path: &str, handler: Handler) -> &mut Self;
+    fn post(&mut self, path: &str, handler: Handler) -> &mut Self;
+    fn put(&mut self, path: &str, handler: Handler) -> &mut Self;
+    fn delete(&mut self, path: &str, handler: Handler) -> &mut Self;
+    fn connect(&mut self, path: &str, handler: Handler) -> &mut Self;
+    fn options(&mut self, path: &str, handler: Handler) -> &mut Self;
+    fn trace(&mut self, path: &str, handler: Handler) -> &mut Self;
+    fn patch(&mut self, path: &str, handler: Handler) -> &mut Self;
 }
 
 #[derive(Debug)]
 pub struct RequestPath {
     pub path: String,
-    pub params: Vec<RequestPathParams>,
+    pub params: BTreeMap<String, RequestPathParams>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RequestPathParams {
     pub param: String,
     pub value: String,
@@ -77,7 +84,7 @@ pub fn middleware_matches_request(request: &Request, route: &Route) -> Result<Op
     let route_path = &route.path;
     let mut route_segments = route_path.split("/").peekable();
 
-    let mut params: Vec<RequestPathParams> = Vec::new();
+    let mut params: BTreeMap<String, RequestPathParams> = BTreeMap::new();
 
     for request_segment in request_segments {
         let route_segment = match route_segments.next() {
@@ -96,17 +103,25 @@ pub fn middleware_matches_request(request: &Request, route: &Route) -> Result<Op
                     break;
                 }
 
-                params.push(RequestPathParams {
-                    param: "*".to_string(),
-                    value: request_segment.to_string(),
-                })
+                params.insert(
+                    "*".to_string(),
+                    RequestPathParams {
+                        param: "*".to_string(),
+                        value: request_segment.to_string(),
+                    },
+                );
             }
 
             // named param
-            s if s.starts_with(":") => params.push(RequestPathParams {
-                param: s.to_string(),
-                value: request_segment.to_string(),
-            }),
+            s if s.starts_with(":") => {
+                params.insert(
+                    s.to_string(),
+                    RequestPathParams {
+                        param: s.to_string(),
+                        value: request_segment.to_string(),
+                    },
+                );
+            }
 
             // not matching
             s if s != request_segment => return Ok(None),
@@ -149,85 +164,31 @@ impl Router for HTTPServer {
         self
     }
 
-    // fn get(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self {
-    //     self.add_route(&Route {
-    //         path,
-    //         handler,
-    //         method: Some(Method::GET),
-    //     });
-    //     self
-    // }
-
-    // fn head(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self {
-    //     self.add_route(&Route {
-    //         path,
-    //         handler,
-    //         method: Some(Method::HEAD),
-    //     });
-    //     self
-    // }
-    // fn post(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self {
-    //     self.add_route(&Route {
-    //         path,
-    //         handler,
-    //         method: Some(Method::POST),
-    //     });
-    //     self
-    // }
-    // fn put(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self {
-    //     self.add_route(&Route {
-    //         path,
-    //         handler,
-    //         method: Some(Method::PUT),
-    //     });
-    //     self
-    // }
-    // fn delete(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self {
-    //     self.add_route(&Route {
-    //         path,
-    //         handler,
-    //         method: Some(Method::DELETE),
-    //     });
-    //     self
-    // }
-    // fn connect(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self {
-    //     self.add_route(&Route {
-    //         path,
-    //         handler,
-    //         method: Some(Method::CONNECT),
-    //     });
-    //     self
-    // }
-    // fn options(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self {
-    //     self.add_route(&Route {
-    //         path,
-    //         handler,
-    //         method: Some(Method::OPTIONS),
-    //     });
-    //     self
-    // }
-    // fn trace(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self {
-    //     self.add_route(&Route {
-    //         path,
-    //         handler,
-    //         method: Some(Method::TRACE),
-    //     });
-    //     self
-    // }
-    // fn patch(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self {
-    //     self.add_route(&Route {
-    //         path,
-    //         handler,
-    //         method: Some(Method::PATCH),
-    //     });
-    //     self
-    // }
-    // fn any(&mut self, path: String, handler: &'static dyn RequestHandlerT) -> &mut Self {
-    //     self.add_route(&Route {
-    //         path,
-    //         handler,
-    //         method: None,
-    //     });
-    //     self
-    // }
+    fn get(&mut self, path: &str, handler: Handler) -> &mut Self {
+        self.handle(Method::GET, path, handler)
+    }
+    fn head(&mut self, path: &str, handler: Handler) -> &mut Self {
+        self.handle(Method::HEAD, path, handler)
+    }
+    fn post(&mut self, path: &str, handler: Handler) -> &mut Self {
+        self.handle(Method::POST, path, handler)
+    }
+    fn put(&mut self, path: &str, handler: Handler) -> &mut Self {
+        self.handle(Method::PUT, path, handler)
+    }
+    fn delete(&mut self, path: &str, handler: Handler) -> &mut Self {
+        self.handle(Method::DELETE, path, handler)
+    }
+    fn connect(&mut self, path: &str, handler: Handler) -> &mut Self {
+        self.handle(Method::CONNECT, path, handler)
+    }
+    fn options(&mut self, path: &str, handler: Handler) -> &mut Self {
+        self.handle(Method::OPTIONS, path, handler)
+    }
+    fn trace(&mut self, path: &str, handler: Handler) -> &mut Self {
+        self.handle(Method::TRACE, path, handler)
+    }
+    fn patch(&mut self, path: &str, handler: Handler) -> &mut Self {
+        self.handle(Method::PATCH, path, handler)
+    }
 }

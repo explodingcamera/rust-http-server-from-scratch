@@ -38,8 +38,8 @@ impl ResponseBuilder {
         self
     }
 
-    pub fn content_type(&mut self, content_type: String) -> &mut Self {
-        self.content_type = content_type;
+    pub fn content_type(&mut self, content_type: &str) -> &mut Self {
+        self.content_type = content_type.to_string();
         self
     }
 
