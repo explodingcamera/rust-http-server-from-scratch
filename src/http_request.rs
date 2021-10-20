@@ -32,7 +32,7 @@ pub enum RequestError {
     TooManyHeaders,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Headers {
     headers: BTreeMap<String, Vec<u8>>,
 }
@@ -43,7 +43,7 @@ impl Headers {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Method {
     GET,
     HEAD,
@@ -80,7 +80,7 @@ impl TryFrom<&str> for Method {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Request {
     /// The request method, such as `GET`.
     pub method: Option<Method>,
