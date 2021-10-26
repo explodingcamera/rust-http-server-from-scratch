@@ -1,13 +1,10 @@
-use anyhow::{anyhow, Result};
-use bytes::{Bytes, BytesMut};
-use futures::channel::mpsc;
-use futures::channel::oneshot;
+#![feature(trait_alias)]
 
-use http_request::Request;
-use router::{Handler, Route, Router};
+use anyhow::Result;
+use bytes::{Bytes, BytesMut};
+use router::Route;
 // helpers for zero-copy
 use socket2::{Domain, Socket, Type};
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,13 +14,11 @@ use tokio::runtime;
 
 // TODO: tokio is temporary and will be replaced by a custom implementation late on
 use tokio;
-use tokio::io::{AsyncReadExt, AsyncWriteExt}; // this implements async operations on buffers
+use tokio::io::AsyncReadExt; // this implements async operations on buffers
 use tokio::net::{TcpListener, TcpStream};
 
-pub use httpstatus::{StatusClass, StatusCode};
-
-use crate::router::MiddlewareContext;
 use crate::router::{middleware_matches_request, RequestPath};
+pub use httpstatus::{StatusClass, StatusCode};
 
 pub mod http_request;
 pub mod http_response;
@@ -36,18 +31,9 @@ const REQUEST_BUFFER_SIZE: usize = 30000;
 pub enum ServerError {}
 
 pub struct HTTPServer {
-    handler_count: u64,
-    handlers: HashMap<u64, Handler>,
     routes_mut: Vec<Route>,
     routes: Arc<Vec<Route>>,
-
     loglevel: LogLevel,
-}
-
-struct NewRequest {
-    pub request: Arc<Request>,
-    pub handlers: Vec<(Route, RequestPath)>,
-    pub resp: oneshot::Sender<Result<Vec<u8>>>,
 }
 
 #[repr(usize)]
@@ -59,13 +45,13 @@ pub enum LogLevel {
     Critical,
 }
 
-trait HTTPFramework: Router {}
+// trait HTTPFramework: Router {}
+trait HTTPFramework {}
 impl HTTPFramework for HTTPServer {}
+
 impl HTTPServer {
     pub fn new() -> Self {
         HTTPServer {
-            handler_count: 0,
-            handlers: HashMap::with_capacity(100),
             routes: Arc::new(vec![]),
             routes_mut: Vec::with_capacity(100),
             loglevel: LogLevel::Off,
@@ -74,10 +60,6 @@ impl HTTPServer {
 
     fn add_route(&mut self, route: Route) {
         self.routes_mut.push(route)
-    }
-
-    fn add_handler(&mut self, id: u64, handler: Handler) {
-        self.handlers.insert(id, handler);
     }
 
     // start listening on a new socket/port
@@ -92,8 +74,6 @@ impl HTTPServer {
     }
 
     async fn listen(&mut self, address: SocketAddr) -> Result<()> {
-        let (tx, mut rx) = mpsc::channel::<NewRequest>(1000);
-
         self.routes = Arc::new(self.routes_mut.clone());
 
         // Create and bind a TCP listener
@@ -145,10 +125,9 @@ impl HTTPServer {
 
                         let loglevel = loglevel.clone();
                         let routes = routes.clone();
-                        let tx = tx.clone();
 
                         tokio::spawn(async move {
-                            HTTPServer::process_request(routes, socket, addr, tx, loglevel)
+                            HTTPServer::process_request(routes, socket, addr, loglevel)
                                 .await
                                 .unwrap_or_else(|e| {
                                     println!("{}", e);
@@ -160,45 +139,7 @@ impl HTTPServer {
             }
         });
 
-        loop {
-            while let Some(req) = rx.try_next().ok() {
-                match req {
-                    None => return Ok(()),
-                    Some(req) => {
-                        let resp_channel = req.resp;
-                        let mut response = http_response::ResponseBuilder::default();
-                        response.set_header("x-powered-by", "webserver-from-scratch");
-                        let mut ctx = MiddlewareContext::new(req.request.clone(), response);
-
-                        let mut err = false;
-                        for (route, request_path) in req.handlers.iter() {
-                            ctx.params = request_path.params.clone();
-
-                            if let Some(handler) = self.handlers.get_mut(&route.handler) {
-                                handler(&mut ctx);
-
-                                if ctx.has_ended() {
-                                    break;
-                                }
-                                continue;
-                            }
-                            err = true;
-                            break;
-                        }
-
-                        if err {
-                            resp_channel
-                                .send(Err(anyhow!("invalid handler id")))
-                                .expect("response channel should be open");
-                        } else {
-                            resp_channel
-                                .send(Ok(ctx.response.build()))
-                                .expect("response channel should be open");
-                        }
-                    }
-                }
-            }
-        }
+        Ok(())
     }
 
     // process incoming sockets
@@ -206,7 +147,6 @@ impl HTTPServer {
         routes: Arc<Vec<Route>>,
         mut socket: TcpStream,
         _addr: SocketAddr,
-        mut tx: mpsc::Sender<NewRequest>,
         loglevel: LogLevel,
     ) -> Result<()> {
         let loglevel = loglevel as usize;
@@ -265,24 +205,16 @@ impl HTTPServer {
                         println!("  path: {}", route.path);
                     }
                     if let Some(request_path) = request_path {
-                        apply_middlewares.push((route.to_owned(), request_path))
+                        apply_middlewares.push((route.clone(), request_path))
                     }
                 }
                 Err(_) => {}
             }
         }
 
-        let (resp_tx, resp_rx) = oneshot::channel();
-        tx.try_send(NewRequest {
-            handlers: apply_middlewares,
-            request,
-            resp: resp_tx,
-        })
-        .expect("channel should be open");
-
         // write response
-        socket.writable().await?;
-        socket.write_all(&resp_rx.await??).await?;
+        // socket.writable().await?;
+        // socket.write_all(&resp_rx.await??).await?;
 
         Ok(())
     }
