@@ -47,6 +47,10 @@ impl ResponseBuilder {
         self.body.put_slice(src)
     }
 
+    pub fn clear(&mut self) {
+        self.body.clear()
+    }
+
     pub fn set_header(&mut self, key: &str, value: &str) -> Option<()> {
         match self.headers.insert(key.to_string(), value.to_string()) {
             Some(_) => Some(()),

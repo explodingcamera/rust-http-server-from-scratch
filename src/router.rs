@@ -1,6 +1,7 @@
-use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
-
 use anyhow::Result;
+use futures::future::BoxFuture;
+use std::{collections::BTreeMap, fmt::Debug, future::Future, sync::Arc};
+use tokio::net::TcpStream;
 
 // https://stackoverflow.com/questions/27883509/can-you-clone-a-closure
 
@@ -10,8 +11,15 @@ use crate::{
     HTTPServer,
 };
 
-pub trait HandlerFn =
-    Fn() -> (dyn std::future::Future<Output = ()> + Send + 'static) + Send + 'static + Sync;
+pub trait HandlerFn = Fn(&MiddlewareContext) -> HandlerFut + Send + 'static + Sync + ?Sized;
+
+// A Box<Future> is `impl<F: ?Sized + Future> Future for Box<F>`
+// so we can just use it to get an unsized future (so we can call it later on)
+// however we also need to pin it, so they actually implement the future trait.
+// BoxFuture is a helper type which does this for us:
+pub type HandlerFut = BoxFuture<'static, Result<()>>;
+// for reference, the equivalent would be
+// pub type HandlerFut = Box<dyn Future<Output = Result<()>> + Unpin + Send + 'static>;
 
 pub struct MiddlewareContext {
     /// Current request
@@ -23,19 +31,36 @@ pub struct MiddlewareContext {
     /// Params
     pub params: BTreeMap<String, RequestPathParams>,
 
+    /// Socket
+    pub socket: Option<TcpStream>,
+
     /// End the request prematurely
     ended: bool,
+
+    // enable raw socket mode
+    raw: bool,
 }
 
 impl MiddlewareContext {
     pub fn new(request: Arc<Request>, response: ResponseBuilder) -> Self {
         Self {
+            socket: None,
             request,
             response,
             ended: false,
             params: BTreeMap::new(),
+            raw: false,
         }
     }
+
+    pub fn set_raw(&mut self, val: bool) {
+        self.raw = val;
+    }
+
+    pub fn is_raw(&mut self) -> bool {
+        self.raw
+    }
+
     pub fn end(&mut self) {
         self.ended = true
     }

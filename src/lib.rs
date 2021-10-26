@@ -1,4 +1,5 @@
 #![feature(trait_alias)]
+#![feature(fn_traits)]
 
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
@@ -14,10 +15,10 @@ use tokio::runtime;
 
 // TODO: tokio is temporary and will be replaced by a custom implementation late on
 use tokio;
-use tokio::io::AsyncReadExt; // this implements async operations on buffers
+use tokio::io::{AsyncReadExt, AsyncWriteExt}; // this implements async operations on buffers
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::router::{middleware_matches_request, RequestPath};
+use crate::router::{middleware_matches_request, MiddlewareContext, RequestPath};
 pub use httpstatus::{StatusClass, StatusCode};
 
 pub mod http_request;
@@ -168,32 +169,11 @@ impl HTTPServer {
         let request = Arc::new(request);
 
         if loglevel > 1 {
-            println!(
-                "  method: {}\n  path: {}\n  version: HTTP/1.{}",
-                request.method.clone().unwrap(),
-                request.path.clone().unwrap(),
-                request.version.clone().unwrap()
-            );
-
-            for (header, value) in request.headers.iter() {
-                println!(
-                    "  header: name=`{}` value=`{}`",
-                    header,
-                    String::from_utf8(value.to_vec()).expect("header to be string")
-                );
-            }
-
-            if !request.body.is_empty() {
-                println!(
-                    "  body: {}",
-                    String::from_utf8(request.body.clone())
-                        .unwrap_or("(not valid utf8)".to_string())
-                );
-            }
+            HTTPServer::print_debug_request(&request.clone());
         }
 
         // for middleware in self
-        let mut apply_middlewares: Vec<(Route, RequestPath)> = vec![];
+        let mut relevant_middlewares: Vec<(Route, RequestPath)> = vec![];
         for route in routes.iter() {
             if !route.method.is_none() && route.method != request.method {
                 continue;
@@ -201,21 +181,73 @@ impl HTTPServer {
 
             match middleware_matches_request(&request, route) {
                 Ok(request_path) => {
-                    if loglevel > 1 {
-                        println!("  path: {}", route.path);
-                    }
                     if let Some(request_path) = request_path {
-                        apply_middlewares.push((route.clone(), request_path))
+                        relevant_middlewares.push((route.clone(), request_path))
                     }
                 }
                 Err(_) => {}
             }
         }
 
+        let mut response = http_response::ResponseBuilder::default();
+        response.set_header("x-powered-by", "webserver-from-scratch");
+
+        let mut ctx = MiddlewareContext::new(request.clone(), response);
+        let mut err = false;
+        for (middleware_route, middleware_path) in relevant_middlewares {
+            ctx.params = middleware_path.params.clone();
+
+            let handler = middleware_route.handler.clone();
+            let fut = handler(&ctx);
+
+            let resp = fut.await;
+            if let Err(e) = resp {
+                err = true;
+                println!("An error occurred on a middleware: {}", e.to_string());
+                break;
+            }
+
+            if ctx.has_ended() {
+                break;
+            }
+        }
+
+        if err {
+            ctx.response.clear();
+            ctx.response.write(b"internal server error");
+            ctx.response.status_code(StatusCode::InternalServerError);
+        }
+
         // write response
-        // socket.writable().await?;
-        // socket.write_all(&resp_rx.await??).await?;
+        if !ctx.is_raw() {
+            socket.writable().await?;
+            socket.write_all(&ctx.response.build()).await?;
+        }
 
         Ok(())
+    }
+
+    fn print_debug_request(request: &http_request::Request) {
+        println!(
+            "  method: {}\n  path: {}\n  version: HTTP/1.{}",
+            request.method.clone().unwrap(),
+            request.path.clone().unwrap(),
+            request.version.clone().unwrap()
+        );
+
+        for (header, value) in request.headers.iter() {
+            println!(
+                "  header: name=`{}` value=`{}`",
+                header,
+                String::from_utf8(value.to_vec()).expect("header to be string")
+            );
+        }
+
+        if !request.body.is_empty() {
+            println!(
+                "  body: {}",
+                String::from_utf8(request.body.clone()).unwrap_or("(not valid utf8)".to_string())
+            );
+        }
     }
 }
