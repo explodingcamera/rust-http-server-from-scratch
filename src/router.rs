@@ -1,7 +1,7 @@
 use anyhow::Result;
 use futures::future::BoxFuture;
-use std::{collections::BTreeMap, fmt::Debug, future::Future, sync::Arc};
-use tokio::net::TcpStream;
+use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
+use tokio::{net::TcpStream, sync::Mutex};
 
 // https://stackoverflow.com/questions/27883509/can-you-clone-a-closure
 
@@ -11,7 +11,11 @@ use crate::{
     HTTPServer,
 };
 
-pub trait HandlerFn = Fn(&MiddlewareContext) -> HandlerFut + Send + 'static + Sync + ?Sized;
+pub trait HandlerFn =
+    Fn(Arc<Mutex<MiddlewareContext>>) -> HandlerFut + Send + 'static + Sync + ?Sized;
+
+// pub trait HandlerFn =
+//     (Fn(&MiddlewareContext) -> dyn Future<Output = Result<()>>) + Send + 'static + Sync + ?Sized;
 
 // A Box<Future> is `impl<F: ?Sized + Future> Future for Box<F>`
 // so we can just use it to get an unsized future (so we can call it later on)
@@ -23,13 +27,13 @@ pub type HandlerFut = BoxFuture<'static, Result<()>>;
 
 pub struct MiddlewareContext {
     /// Current request
-    pub request: Arc<Request>,
+    pub request: Request,
 
     /// Response builder
     pub response: ResponseBuilder,
 
     /// Params
-    pub params: BTreeMap<String, RequestPathParams>,
+    pub params: Arc<BTreeMap<String, RequestPathParams>>,
 
     /// Socket
     pub socket: Option<TcpStream>,
@@ -42,13 +46,13 @@ pub struct MiddlewareContext {
 }
 
 impl MiddlewareContext {
-    pub fn new(request: Arc<Request>, response: ResponseBuilder) -> Self {
+    pub fn new(request: Request, response: ResponseBuilder) -> Self {
         Self {
             socket: None,
             request,
             response,
             ended: false,
-            params: BTreeMap::new(),
+            params: Arc::new(BTreeMap::new()),
             raw: false,
         }
     }
@@ -96,27 +100,24 @@ impl Clone for Route {
     }
 }
 
-pub type Handler = Box<dyn FnMut(&mut MiddlewareContext)>;
-
 pub trait Router<F>
 where
     F: HandlerFn,
 {
     fn handle(&mut self, method: Method, path: &str, handler: F) -> &mut Self;
-
-    // fn any(&mut self, path: &str, handler: Handler) -> &mut Self;
-    // fn get(&mut self, path: &str, handler: Handler) -> &mut Self;
-    // fn head(&mut self, path: &str, handler: Handler) -> &mut Self;
-    // fn post(&mut self, path: &str, handler: Handler) -> &mut Self;
-    // fn put(&mut self, path: &str, handler: Handler) -> &mut Self;
-    // fn delete(&mut self, path: &str, handler: Handler) -> &mut Self;
-    // fn connect(&mut self, path: &str, handler: Handler) -> &mut Self;
-    // fn options(&mut self, path: &str, handler: Handler) -> &mut Self;
-    // fn trace(&mut self, path: &str, handler: Handler) -> &mut Self;
-    // fn patch(&mut self, path: &str, handler: Handler) -> &mut Self;
+    fn any(&mut self, path: &str, handler: F) -> &mut Self;
+    fn get(&mut self, path: &str, handler: F) -> &mut Self;
+    fn head(&mut self, path: &str, handler: F) -> &mut Self;
+    fn post(&mut self, path: &str, handler: F) -> &mut Self;
+    fn put(&mut self, path: &str, handler: F) -> &mut Self;
+    fn delete(&mut self, path: &str, handler: F) -> &mut Self;
+    fn connect(&mut self, path: &str, handler: F) -> &mut Self;
+    fn options(&mut self, path: &str, handler: F) -> &mut Self;
+    fn trace(&mut self, path: &str, handler: F) -> &mut Self;
+    fn patch(&mut self, path: &str, handler: F) -> &mut Self;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RequestPath {
     pub path: String,
     pub params: BTreeMap<String, RequestPathParams>,
@@ -196,7 +197,7 @@ where
 {
     fn handle(&mut self, method: Method, path: &str, handler: F) -> &mut Self {
         let handler: Arc<Box<dyn HandlerFn>> = Arc::new(Box::new(handler));
-        let route = Route {
+        let route: Route = Route {
             path: path.to_string(),
             method: Some(method),
             handler: handler,
@@ -206,43 +207,42 @@ where
         self
     }
 
-    // fn any(&mut self, path: &str, handler: Handler) -> &mut Self {
-    //     self.handler_count += 1;
-    //     let route = Route {
-    //         path: path.to_string(),
-    //         handler: self.handler_count,
-    //         method: None,
-    //     };
-    //     self.add_handler(self.handler_count, handler);
-    //     self.add_route(route);
-    //     self
-    // }
+    fn any(&mut self, path: &str, handler: F) -> &mut Self {
+        let handler: Arc<Box<dyn HandlerFn>> = Arc::new(Box::new(handler));
+        let route: Route = Route {
+            path: path.to_string(),
+            method: None,
+            handler: handler,
+        };
+        self.add_route(route);
+        self
+    }
 
-    // fn get(&mut self, path: &str, handler: Handler) -> &mut Self {
-    //     self.handle(Method::GET, path, handler)
-    // }
-    // fn head(&mut self, path: &str, handler: Handler) -> &mut Self {
-    //     self.handle(Method::HEAD, path, handler)
-    // }
-    // fn post(&mut self, path: &str, handler: Handler) -> &mut Self {
-    //     self.handle(Method::POST, path, handler)
-    // }
-    // fn put(&mut self, path: &str, handler: Handler) -> &mut Self {
-    //     self.handle(Method::PUT, path, handler)
-    // }
-    // fn delete(&mut self, path: &str, handler: Handler) -> &mut Self {
-    //     self.handle(Method::DELETE, path, handler)
-    // }
-    // fn connect(&mut self, path: &str, handler: Handler) -> &mut Self {
-    //     self.handle(Method::CONNECT, path, handler)
-    // }
-    // fn options(&mut self, path: &str, handler: Handler) -> &mut Self {
-    //     self.handle(Method::OPTIONS, path, handler)
-    // }
-    // fn trace(&mut self, path: &str, handler: Handler) -> &mut Self {
-    //     self.handle(Method::TRACE, path, handler)
-    // }
-    // fn patch(&mut self, path: &str, handler: Handler) -> &mut Self {
-    //     self.handle(Method::PATCH, path, handler)
-    // }
+    fn get(&mut self, path: &str, handler: F) -> &mut Self {
+        self.handle(Method::GET, path, handler)
+    }
+    fn head(&mut self, path: &str, handler: F) -> &mut Self {
+        self.handle(Method::HEAD, path, handler)
+    }
+    fn post(&mut self, path: &str, handler: F) -> &mut Self {
+        self.handle(Method::POST, path, handler)
+    }
+    fn put(&mut self, path: &str, handler: F) -> &mut Self {
+        self.handle(Method::PUT, path, handler)
+    }
+    fn delete(&mut self, path: &str, handler: F) -> &mut Self {
+        self.handle(Method::DELETE, path, handler)
+    }
+    fn connect(&mut self, path: &str, handler: F) -> &mut Self {
+        self.handle(Method::CONNECT, path, handler)
+    }
+    fn options(&mut self, path: &str, handler: F) -> &mut Self {
+        self.handle(Method::OPTIONS, path, handler)
+    }
+    fn trace(&mut self, path: &str, handler: F) -> &mut Self {
+        self.handle(Method::TRACE, path, handler)
+    }
+    fn patch(&mut self, path: &str, handler: F) -> &mut Self {
+        self.handle(Method::PATCH, path, handler)
+    }
 }

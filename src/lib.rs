@@ -1,5 +1,6 @@
 #![feature(trait_alias)]
 #![feature(fn_traits)]
+#![feature(associated_type_bounds)]
 
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
@@ -12,6 +13,7 @@ use std::time::Duration;
 use std::vec;
 use thiserror::Error;
 use tokio::runtime;
+use tokio::sync::Mutex;
 
 // TODO: tokio is temporary and will be replaced by a custom implementation late on
 use tokio;
@@ -46,11 +48,10 @@ pub enum LogLevel {
     Critical,
 }
 
-// trait HTTPFramework: Router {}
 trait HTTPFramework {}
-impl HTTPFramework for HTTPServer {}
+impl<'a> HTTPFramework for HTTPServer {}
 
-impl HTTPServer {
+impl<'a> HTTPServer {
     pub fn new() -> Self {
         HTTPServer {
             routes: Arc::new(vec![]),
@@ -117,30 +118,26 @@ impl HTTPServer {
         let routes = self.routes.clone();
         let loglevel = self.loglevel.clone();
 
-        tokio::spawn(async move {
-            loop {
-                match listener.accept().await {
-                    Ok((socket, addr)) => {
-                        // Spawn a new non-blocking, multithreaded task for each request
-                        // (A task is essentially a green thread)
+        loop {
+            match listener.accept().await {
+                Ok((socket, addr)) => {
+                    // Spawn a new non-blocking, multithreaded task for each request
+                    // (A task is essentially a green thread)
 
-                        let loglevel = loglevel.clone();
-                        let routes = routes.clone();
+                    let loglevel = loglevel.clone();
+                    let routes = routes.clone();
 
-                        tokio::spawn(async move {
-                            HTTPServer::process_request(routes, socket, addr, loglevel)
-                                .await
-                                .unwrap_or_else(|e| {
-                                    println!("{}", e);
-                                })
-                        });
-                    }
-                    Err(e) => println!("couldn't get client: {:?}", e),
+                    tokio::spawn(async move {
+                        HTTPServer::process_request(routes, socket, addr, loglevel)
+                            .await
+                            .unwrap_or_else(|e| {
+                                println!("{}", e);
+                            })
+                    });
                 }
+                Err(e) => println!("couldn't get client: {:?}", e),
             }
-        });
-
-        Ok(())
+        }
     }
 
     // process incoming sockets
@@ -166,14 +163,13 @@ impl HTTPServer {
         // parse requests
         let mut request = http_request::Request::new();
         request.parse(Bytes::from(buffer))?;
-        let request = Arc::new(request);
 
         if loglevel > 1 {
             HTTPServer::print_debug_request(&request.clone());
         }
 
         // for middleware in self
-        let mut relevant_middlewares: Vec<(Route, RequestPath)> = vec![];
+        let mut relevant_middlewares: &mut Vec<(Route, RequestPath)> = &mut vec![];
         for route in routes.iter() {
             if !route.method.is_none() && route.method != request.method {
                 continue;
@@ -182,7 +178,7 @@ impl HTTPServer {
             match middleware_matches_request(&request, route) {
                 Ok(request_path) => {
                     if let Some(request_path) = request_path {
-                        relevant_middlewares.push((route.clone(), request_path))
+                        relevant_middlewares.push((route.clone(), request_path.clone()))
                     }
                 }
                 Err(_) => {}
@@ -192,38 +188,48 @@ impl HTTPServer {
         let mut response = http_response::ResponseBuilder::default();
         response.set_header("x-powered-by", "webserver-from-scratch");
 
-        let mut ctx = MiddlewareContext::new(request.clone(), response);
+        let req = request.clone();
+        let resp = response.clone();
+
+        let ctx = Arc::new(Mutex::new(MiddlewareContext::new(req, resp)));
+
         let mut err = false;
         for (middleware_route, middleware_path) in relevant_middlewares {
-            ctx.params = middleware_path.params.clone();
-
-            let handler = middleware_route.handler.clone();
-            let fut = handler(&ctx);
-
-            let resp = fut.await;
-            if let Err(e) = resp {
-                err = true;
-                println!("An error occurred on a middleware: {}", e.to_string());
-                break;
+            {
+                let mut x = ctx.lock().await;
+                x.params = Arc::new(middleware_path.params.clone());
             }
+            let handler = middleware_route.handler.clone();
 
-            if ctx.has_ended() {
+            let fut = handler(ctx.clone());
+
+            match fut.await {
+                Err(e) => {
+                    err = true;
+                    println!("An error occurred on a middleware: {}", e.to_string());
+                }
+                Ok(_) => {}
+            };
+
+            if ctx.lock().await.has_ended() {
                 break;
             }
         }
 
+        let ctx = ctx.clone();
+
         if err {
+            let mut ctx = ctx.lock().await;
             ctx.response.clear();
             ctx.response.write(b"internal server error");
             ctx.response.status_code(StatusCode::InternalServerError);
         }
 
         // write response
-        if !ctx.is_raw() {
+        if !ctx.lock().await.is_raw() {
             socket.writable().await?;
-            socket.write_all(&ctx.response.build()).await?;
+            socket.write_all(&ctx.lock().await.response.build()).await?;
         }
-
         Ok(())
     }
 
