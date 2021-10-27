@@ -94,6 +94,12 @@ pub struct Request {
     pub body: Vec<u8>,
 }
 
+impl Default for Request {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Request {
     // Creates a new Request
     pub fn new() -> Self {
@@ -109,7 +115,7 @@ impl Request {
     }
 
     pub fn parse(&mut self, buf: Bytes) -> Result<(), RequestError> {
-        let mut bytes = Bytes::from(buf);
+        let mut bytes = buf;
 
         self.method = Some(
             Request::parse_token(&mut bytes)?
@@ -196,14 +202,14 @@ impl Request {
             if b == &b' ' {
                 let token = &bytes.slice(0..i)[..];
                 bytes.advance(i + 1);
-                return Ok(std::str::from_utf8(&token)
+                return Ok(std::str::from_utf8(token)
                     .map_err(|_| RequestError::URI)?
                     .to_string());
             } else if !tokens::is_uri_token(*b) {
                 break;
             }
         }
-        return Err(RequestError::URI);
+        Err(RequestError::URI)
     }
 
     pub fn parse_token(bytes: &mut Bytes) -> Result<String, RequestError> {
@@ -211,14 +217,14 @@ impl Request {
             if b == &b' ' {
                 let token = &bytes.slice(0..i)[..];
                 bytes.advance(i + 1);
-                return Ok(std::str::from_utf8(&token)
+                return Ok(std::str::from_utf8(token)
                     .map_err(|_| RequestError::Token)?
                     .to_string());
             } else if !tokens::is_token(*b) {
                 break;
             }
         }
-        return Err(RequestError::Token);
+        Err(RequestError::Token)
     }
 
     pub fn parse_header_name(bytes: &mut Bytes) -> Result<String, RequestError> {
@@ -226,14 +232,14 @@ impl Request {
             if b == &b':' {
                 let token = &bytes.slice(0..i)[..];
                 bytes.advance(i + 1);
-                return Ok(std::str::from_utf8(&token)
+                return Ok(std::str::from_utf8(token)
                     .map_err(|_| RequestError::Token)?
                     .to_string());
             } else if !tokens::is_header_name_token(*b) {
                 break;
             }
         }
-        return Err(RequestError::Token);
+        Err(RequestError::Token)
     }
 
     pub fn parse_header_value(bytes: &mut Bytes) -> Result<Vec<u8>, RequestError> {
@@ -247,7 +253,7 @@ impl Request {
                 break;
             }
         }
-        return Err(RequestError::Token);
+        Err(RequestError::Token)
     }
 }
 

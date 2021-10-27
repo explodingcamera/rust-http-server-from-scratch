@@ -1,7 +1,8 @@
 use anyhow::Result;
 use futures::future::BoxFuture;
+use parking_lot::Mutex;
 use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
-use tokio::{net::TcpStream, sync::Mutex};
+use tokio::net::TcpStream;
 
 // https://stackoverflow.com/questions/27883509/can-you-clone-a-closure
 
@@ -11,8 +12,7 @@ use crate::{
     HTTPServer,
 };
 
-pub trait HandlerFn =
-    Fn(Arc<Mutex<MiddlewareContext>>) -> HandlerFut + Send + 'static + Sync + ?Sized;
+pub trait HandlerFn = Fn(MiddlewareCtx) -> HandlerFut + Send + 'static + Sync + ?Sized;
 
 // pub trait HandlerFn =
 //     (Fn(&MiddlewareContext) -> dyn Future<Output = Result<()>>) + Send + 'static + Sync + ?Sized;
@@ -25,6 +25,7 @@ pub type HandlerFut = BoxFuture<'static, Result<()>>;
 // for reference, the equivalent would be
 // pub type HandlerFut = Box<dyn Future<Output = Result<()>> + Unpin + Send + 'static>;
 
+pub type MiddlewareCtx = Arc<Mutex<MiddlewareContext>>;
 pub struct MiddlewareContext {
     /// Current request
     pub request: Request,
@@ -33,7 +34,7 @@ pub struct MiddlewareContext {
     pub response: ResponseBuilder,
 
     /// Params
-    pub params: Arc<BTreeMap<String, RequestPathParams>>,
+    pub params: BTreeMap<String, RequestPathParams>,
 
     /// Socket
     pub socket: Option<TcpStream>,
@@ -52,7 +53,7 @@ impl MiddlewareContext {
             request,
             response,
             ended: false,
-            params: Arc::new(BTreeMap::new()),
+            params: BTreeMap::new(),
             raw: false,
         }
     }
@@ -130,11 +131,11 @@ pub struct RequestPathParams {
 }
 
 pub fn middleware_matches_request(request: &Request, route: &Route) -> Result<Option<RequestPath>> {
-    let request_path = request.path.clone().unwrap_or("".to_string());
-    let request_segments = request_path.split("/").peekable();
+    let request_path = request.path.clone().unwrap_or_else(|| "".to_string());
+    let request_segments = request_path.split('/').peekable();
 
     let route_path = &route.path;
-    let mut route_segments = route_path.split("/").peekable();
+    let mut route_segments = route_path.split('/').peekable();
 
     let mut params: BTreeMap<String, RequestPathParams> = BTreeMap::new();
 
@@ -151,7 +152,7 @@ pub fn middleware_matches_request(request: &Request, route: &Route) -> Result<Op
                 // path = `/123/*/`           will also behave like a param
                 // path = `/123/*`            will accept any path, even when nesting /'s (e.g `/123/456`, `/123/456/789`)
 
-                if route_segments.peek().is_none() && !route_path.ends_with("/") {
+                if route_segments.peek().is_none() && !route_path.ends_with('/') {
                     break;
                 }
 
@@ -165,7 +166,7 @@ pub fn middleware_matches_request(request: &Request, route: &Route) -> Result<Op
             }
 
             // named param
-            s if s.starts_with(":") => {
+            s if s.starts_with(':') => {
                 params.insert(
                     s.to_string(),
                     RequestPathParams {
@@ -200,7 +201,7 @@ where
         let route: Route = Route {
             path: path.to_string(),
             method: Some(method),
-            handler: handler,
+            handler,
         };
 
         self.add_route(route);
@@ -212,7 +213,7 @@ where
         let route: Route = Route {
             path: path.to_string(),
             method: None,
-            handler: handler,
+            handler,
         };
         self.add_route(route);
         self

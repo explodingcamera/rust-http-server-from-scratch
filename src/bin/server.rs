@@ -1,63 +1,48 @@
 #![feature(async_closure)]
 
-use std::sync::Arc;
-
 use anyhow::Result;
-use tokio::sync::Mutex;
-use webserver_from_scratch::{
-    router::{HandlerFn, HandlerFut, MiddlewareContext, Router},
-    HTTPServer, LogLevel, StatusCode,
-};
+use webserver_from_scratch::{middleware, router::Router, HTTPServer, LogLevel, StatusCode};
 
 fn main() -> Result<()> {
     let mut server = HTTPServer::new();
     server.loglevel(LogLevel::Off);
 
+    let hello_world_handler = middleware!(|ctx| {
+        let resp = b"<h1>Hello World</h1>";
+        ctx.response.content_type("text/html");
+        ctx.response.write(resp);
+        ctx.end();
+    });
+
+    let hello_handler = middleware!(|ctx| {
+        ctx.response.content_type("text/html");
+        ctx.response.write(b"<h1>Hello ");
+
+        let params = ctx.params.clone();
+        let name = params.get(":name");
+        let name = if let Some(name) = name {
+            name.value.as_bytes()
+        } else {
+            b"World"
+        };
+
+        ctx.response.write(name);
+        ctx.response.write(b"</h1>");
+        ctx.end();
+    });
+
     server
-        .get("/", |ctx: Arc<Mutex<MiddlewareContext>>| -> HandlerFut {
-            Box::pin(async move {
-                let mut ctx = ctx.lock().await;
-                let resp = b"<h1>Hello World</h1>";
-                ctx.response.content_type("text/html");
-                ctx.response.write(resp);
-                ctx.end();
-                Ok(())
-            })
-        })
-        .get(
-            "/:name",
-            |ctx: Arc<Mutex<MiddlewareContext>>| -> HandlerFut {
-                Box::pin(async move {
-                    let mut _ctx = ctx.lock().await;
-                    _ctx.response.content_type("text/html");
-                    _ctx.response.write(b"<h1>Hello ");
+        .get("/", hello_world_handler)
+        .get("/:name", hello_handler);
 
-                    let params = _ctx.params.clone();
-                    let name = params.get(":name");
-                    let name = if let Some(name) = name {
-                        name.value.as_bytes()
-                    } else {
-                        b"World"
-                    };
-
-                    _ctx.response.write(&name);
-                    _ctx.response.write(b"</h1>");
-                    _ctx.end();
-                    Ok(())
-                })
-            },
-        );
-
-    server.any("*", |ctx: Arc<Mutex<MiddlewareContext>>| -> HandlerFut {
-        Box::pin(async move {
-            let mut ctx = ctx.lock().await;
-
+    server.any(
+        "*",
+        middleware!(|ctx| {
             let resp = b"404";
             ctx.response.status_code(StatusCode::NotFound);
             ctx.response.write(resp);
-            Ok(())
-        })
-    });
+        }),
+    );
 
     server.listen_blocking("[::1]:8080".parse().unwrap())
 }

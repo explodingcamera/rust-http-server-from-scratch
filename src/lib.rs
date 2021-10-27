@@ -4,6 +4,7 @@
 
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
+use parking_lot::Mutex;
 use router::Route;
 // helpers for zero-copy
 use socket2::{Domain, Socket, Type};
@@ -13,10 +14,8 @@ use std::time::Duration;
 use std::vec;
 use thiserror::Error;
 use tokio::runtime;
-use tokio::sync::Mutex;
 
 // TODO: tokio is temporary and will be replaced by a custom implementation late on
-use tokio;
 use tokio::io::{AsyncReadExt, AsyncWriteExt}; // this implements async operations on buffers
 use tokio::net::{TcpListener, TcpStream};
 
@@ -25,6 +24,7 @@ pub use httpstatus::{StatusClass, StatusCode};
 
 pub mod http_request;
 pub mod http_response;
+mod macros;
 pub mod router;
 pub mod tokens;
 
@@ -50,6 +50,12 @@ pub enum LogLevel {
 
 trait HTTPFramework {}
 impl<'a> HTTPFramework for HTTPServer {}
+
+impl<'a> Default for HTTPServer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl<'a> HTTPServer {
     pub fn new() -> Self {
@@ -169,19 +175,14 @@ impl<'a> HTTPServer {
         }
 
         // for middleware in self
-        let mut relevant_middlewares: &mut Vec<(Route, RequestPath)> = &mut vec![];
+        let relevant_middlewares: &mut Vec<(Route, RequestPath)> = &mut vec![];
         for route in routes.iter() {
-            if !route.method.is_none() && route.method != request.method {
+            if route.method.is_some() && route.method != request.method {
                 continue;
             }
 
-            match middleware_matches_request(&request, route) {
-                Ok(request_path) => {
-                    if let Some(request_path) = request_path {
-                        relevant_middlewares.push((route.clone(), request_path.clone()))
-                    }
-                }
-                Err(_) => {}
+            if let Ok(Some(request_path)) = middleware_matches_request(&request, route) {
+                relevant_middlewares.push((route.clone(), request_path.clone()))
             }
         }
 
@@ -196,22 +197,20 @@ impl<'a> HTTPServer {
         let mut err = false;
         for (middleware_route, middleware_path) in relevant_middlewares {
             {
-                let mut x = ctx.lock().await;
-                x.params = Arc::new(middleware_path.params.clone());
+                let mut x = ctx.lock();
+                x.params = middleware_path.params.clone();
             }
             let handler = middleware_route.handler.clone();
 
             let fut = handler(ctx.clone());
 
-            match fut.await {
-                Err(e) => {
-                    err = true;
-                    println!("An error occurred on a middleware: {}", e.to_string());
-                }
-                Ok(_) => {}
-            };
+            if let Err(e) = fut.await {
+                err = true;
+                println!("An error occurred on a middleware: {}", e);
+                break;
+            }
 
-            if ctx.lock().await.has_ended() {
+            if ctx.lock().has_ended() {
                 break;
             }
         }
@@ -219,16 +218,16 @@ impl<'a> HTTPServer {
         let ctx = ctx.clone();
 
         if err {
-            let mut ctx = ctx.lock().await;
+            let mut ctx = ctx.lock();
             ctx.response.clear();
             ctx.response.write(b"internal server error");
             ctx.response.status_code(StatusCode::InternalServerError);
         }
 
         // write response
-        if !ctx.lock().await.is_raw() {
+        if !ctx.lock().is_raw() {
             socket.writable().await?;
-            socket.write_all(&ctx.lock().await.response.build()).await?;
+            socket.write_all(&ctx.lock().response.build()).await?;
         }
         Ok(())
     }
@@ -238,7 +237,7 @@ impl<'a> HTTPServer {
             "  method: {}\n  path: {}\n  version: HTTP/1.{}",
             request.method.clone().unwrap(),
             request.path.clone().unwrap(),
-            request.version.clone().unwrap()
+            request.version.unwrap()
         );
 
         for (header, value) in request.headers.iter() {
@@ -252,7 +251,8 @@ impl<'a> HTTPServer {
         if !request.body.is_empty() {
             println!(
                 "  body: {}",
-                String::from_utf8(request.body.clone()).unwrap_or("(not valid utf8)".to_string())
+                String::from_utf8(request.body.clone())
+                    .unwrap_or_else(|_| "(not valid utf8)".to_string())
             );
         }
     }

@@ -71,7 +71,7 @@ impl ResponseBuilder {
         // parse body
         let body = self.body.clone();
         let content_length = self.body.len();
-        let content_type = if self.content_type != "" {
+        let content_type = if !self.content_type.is_empty() {
             self.content_type.clone()
         } else {
             "text/plain".to_string()
