@@ -16,7 +16,5 @@ $ cargo run --bin server
 # TODO:
 
 - Security Checks
-- Streaming Body Responses
-- async handlers (pinning?) & less copying between threads
 - Websockets
 - More thorough testing
