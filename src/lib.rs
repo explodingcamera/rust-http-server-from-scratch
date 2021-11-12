@@ -1,6 +1,7 @@
 #![feature(trait_alias)]
 #![feature(fn_traits)]
 #![feature(associated_type_bounds)]
+#![feature(async_closure)]
 
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
@@ -27,6 +28,7 @@ pub mod http_response;
 mod macros;
 pub mod router;
 pub mod tokens;
+pub mod websocket;
 
 const REQUEST_BUFFER_SIZE: usize = 30000;
 
@@ -191,8 +193,7 @@ impl<'a> HTTPServer {
 
         let req = request.clone();
         let resp = response.clone();
-
-        let ctx = Arc::new(Mutex::new(MiddlewareContext::new(req, resp)));
+        let ctx = Arc::new(Mutex::new(MiddlewareContext::new(req, resp, socket)));
 
         let mut err = false;
         for (middleware_route, middleware_path) in relevant_middlewares {
@@ -225,10 +226,13 @@ impl<'a> HTTPServer {
         }
 
         // write response
-        if !ctx.lock().is_raw() {
-            socket.writable().await?;
-            socket.write_all(&ctx.lock().response.build()).await?;
+        let mut ctx = ctx.lock();
+        if !ctx.is_raw() {
+            let resp = &ctx.response.build();
+            ctx.socket.writable().await?;
+            ctx.socket.write_all(resp).await?;
         }
+
         Ok(())
     }
 

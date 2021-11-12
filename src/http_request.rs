@@ -32,6 +32,13 @@ pub enum RequestError {
     TooManyHeaders,
 }
 
+#[derive(Error, Debug)]
+pub enum HeaderError {
+    #[error("header not found")]
+    NotFound,
+    #[error("header value is not a valid string")]
+    InvalidString,
+}
 #[derive(Debug, Clone)]
 pub struct Headers {
     headers: BTreeMap<String, Vec<u8>>,
@@ -40,6 +47,15 @@ pub struct Headers {
 impl Headers {
     pub fn iter(&self) -> btree_map::Iter<String, Vec<u8>> {
         self.headers.iter()
+    }
+
+    pub fn get_str(&self, name: &str) -> Result<String, HeaderError> {
+        let header = self.get(name)?;
+        String::from_utf8(header.to_vec()).map_err(|_| HeaderError::InvalidString)
+    }
+
+    pub fn get(&self, name: &str) -> Result<&Vec<u8>, HeaderError> {
+        self.headers.get(name).ok_or(HeaderError::NotFound)
     }
 }
 

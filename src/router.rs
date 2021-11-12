@@ -21,7 +21,7 @@ pub trait HandlerFn = Fn(MiddlewareCtx) -> HandlerFut + Send + 'static + Sync + 
 // so we can just use it to get an unsized future (so we can call it later on)
 // however we also need to pin it, so they actually implement the future trait.
 // BoxFuture is a helper type which does this for us:
-pub type HandlerFut = BoxFuture<'static, Result<()>>;
+pub type HandlerFut = BoxFuture<'static, Result<(), anyhow::Error>>;
 // for reference, the equivalent would be
 // pub type HandlerFut = Box<dyn Future<Output = Result<()>> + Unpin + Send + 'static>;
 
@@ -37,7 +37,7 @@ pub struct MiddlewareContext {
     pub params: BTreeMap<String, RequestPathParams>,
 
     /// Socket
-    pub socket: Option<TcpStream>,
+    pub socket: TcpStream,
 
     /// End the request prematurely
     ended: bool,
@@ -47,9 +47,9 @@ pub struct MiddlewareContext {
 }
 
 impl MiddlewareContext {
-    pub fn new(request: Request, response: ResponseBuilder) -> Self {
+    pub fn new(request: Request, response: ResponseBuilder, socket: TcpStream) -> Self {
         Self {
-            socket: None,
+            socket,
             request,
             response,
             ended: false,
