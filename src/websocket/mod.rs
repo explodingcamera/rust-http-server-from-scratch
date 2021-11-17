@@ -1,4 +1,5 @@
 mod frame;
+mod mask;
 mod middleware;
 
 pub use middleware::accept_websocket;

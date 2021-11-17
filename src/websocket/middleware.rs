@@ -1,10 +1,11 @@
-use crate::router::MiddlewareContext;
+use crate::{router::MiddlewareContext, websocket::mask::apply_mask};
 use anyhow::Result;
-use bytes::{BufMut, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use parking_lot::MutexGuard;
 use sha1::{Digest, Sha1};
-use std::io::ErrorKind;
-use tokio::io::AsyncWriteExt;
+use std::ops::DerefMut;
+use std::{io::ErrorKind, str::from_utf8};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::frame::FrameHeader;
 
@@ -46,7 +47,7 @@ pub async fn accept_websocket<'a>(ctx: &mut MutexGuard<'a, MiddlewareContext>) -
 
     loop {
         ctx.socket.readable().await?;
-        let mut buf = BytesMut::new();
+        let mut buf = BytesMut::with_capacity(65536);
 
         match ctx.socket.try_read_buf(&mut buf) {
             Ok(0) => break,
@@ -61,10 +62,19 @@ pub async fn accept_websocket<'a>(ctx: &mut MutexGuard<'a, MiddlewareContext>) -
             } // https://github.com/1tgr/rust-websocket-lite/blob/master/websocket-codec/src/frame.rs
         };
 
+        let mut buf = buf.freeze();
         let header = FrameHeader::from_bytes(&mut buf);
         match header {
             Ok(header) => {
-                println!("got websocket data: header: {:?}", header);
+                println!("got websocket data:\n  header: {:?}", header);
+                if let Some(mask) = header.mask {
+                    let mut data = buf.to_vec();
+                    apply_mask(&mut data, mask);
+
+                    if let Some(data) = from_utf8(&data).ok() {
+                        println!("  data: {:?}", data);
+                    }
+                }
             }
             Err(e) => {
                 println!("got invalid data: {:?}", e);
