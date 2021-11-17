@@ -1,13 +1,16 @@
+use crate::router::MiddlewareContext;
 use anyhow::Result;
 use bytes::{BufMut, BytesMut};
-use parking_lot::{MutexGuard, RawMutex};
+use parking_lot::MutexGuard;
 use sha1::{Digest, Sha1};
 use std::io::ErrorKind;
 use tokio::io::AsyncWriteExt;
 
-use crate::router::MiddlewareContext;
+use super::frame::FrameHeader;
 
 pub async fn accept_websocket<'a>(ctx: &mut MutexGuard<'a, MiddlewareContext>) -> Result<()> {
+    println!("got incoming websocket connection");
+
     let connection = match ctx.request.headers.get_str("Connection") {
         Err(_) => return Ok(()),
         Ok(v) => v,
@@ -24,6 +27,8 @@ pub async fn accept_websocket<'a>(ctx: &mut MutexGuard<'a, MiddlewareContext>) -
 
     let version = ctx.request.headers.get_str("Sec-WebSocket-Version")?;
     let key = ctx.request.headers.get_str("Sec-WebSocket-Key")?;
+
+    println!("websocket client connected with version {}", version);
 
     let mut hasher = Sha1::new();
     hasher.update(key);
@@ -43,9 +48,7 @@ pub async fn accept_websocket<'a>(ctx: &mut MutexGuard<'a, MiddlewareContext>) -
         ctx.socket.readable().await?;
         let mut buf = BytesMut::new();
 
-        // TODO: keep reading
-        // https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers#decoding_payload_length
-        let bytes = match ctx.socket.try_read_buf(&mut buf) {
+        match ctx.socket.try_read_buf(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
                 println!("read {} bytes", n);
@@ -57,6 +60,16 @@ pub async fn accept_websocket<'a>(ctx: &mut MutexGuard<'a, MiddlewareContext>) -
                 return Err(e.into());
             } // https://github.com/1tgr/rust-websocket-lite/blob/master/websocket-codec/src/frame.rs
         };
+
+        let header = FrameHeader::from_bytes(&mut buf);
+        match header {
+            Ok(header) => {
+                println!("got websocket data: header: {:?}", header);
+            }
+            Err(e) => {
+                println!("got invalid data: {:?}", e);
+            }
+        }
     }
 
     Ok(())

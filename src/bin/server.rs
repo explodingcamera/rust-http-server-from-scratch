@@ -31,16 +31,16 @@ fn main() -> Result<()> {
         ctx.end();
     });
 
-    server
-        .get("/", hello_world_handler)
-        .get("/:name", hello_handler);
-
     server.get(
         "*",
         middleware!(|ctx| {
             webserver_from_scratch::websocket::accept_websocket(&mut ctx).await?;
         }),
     );
+
+    server
+        .get("/", hello_world_handler)
+        .get("/:name", hello_handler);
 
     server.any(
         "*",

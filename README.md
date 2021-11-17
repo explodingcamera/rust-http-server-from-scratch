@@ -98,3 +98,14 @@ middleware!(|ctx| {
     closure // return closure from this block
 }
 ```
+
+# Inspirations
+
+- Websocket
+  - https://github.com/1tgr/rust-websocket-lite
+  - https://github.com/snapview/tungstenite-rs
+- Http
+  - https://expressjs.com
+  - https://github.com/nickel-org/nickel.rs
+  - https://github.com/seanmonstar/httparse
+  - https://github.com/magic003/http-parser-rs
