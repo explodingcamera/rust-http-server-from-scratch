@@ -15,11 +15,21 @@ $ cargo run --bin server
 
 # TODO:
 
-- Security Checks
-- Websockets (Middleware/event listeners? e.g `.on("upgrade")`)
+- More Security Checks (Request Size limits)
+- Websockets
+  - [x] websocket middleware
+  - [x] websocket upgrade
+  - [x] websocket frame parser
+  - [x] websocket masking
+  - [ ] websocket chunked messages
+  - [ ] websocket frame builder
 - Partial request parsing
 - Stream Abstraction (Chunked encoding)
 - Revisit low level parallel processing of incoming sockets
+
+# Assessment
+
+- Which areas still need some focus? Other network protocols?
 
 # Full Example
 
