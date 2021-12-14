@@ -27,10 +27,6 @@ $ cargo run --bin server
 - Stream Abstraction (Chunked encoding)
 - Revisit low level parallel processing of incoming sockets
 
-# Assessment
-
-- Which areas still need some focus? Other network protocols?
-
 # Full Example
 
 ```rust

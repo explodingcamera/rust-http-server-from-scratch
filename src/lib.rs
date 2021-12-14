@@ -16,7 +16,6 @@ use std::vec;
 use thiserror::Error;
 use tokio::runtime;
 
-// TODO: tokio is temporary and will be replaced by a custom implementation late on
 use tokio::io::{AsyncReadExt, AsyncWriteExt}; // this implements async operations on buffers
 use tokio::net::{TcpListener, TcpStream};
 
@@ -109,8 +108,6 @@ impl<'a> HTTPServer {
         // We convert the socket into a tokio::net::TcpListener, since this
         // includes a handy way to check if a socket is ready (since we use non blocking sockets)
         // and async functions for reading from/writing to a socket (since we use non-blocking green threads).
-        //
-        // This reliance on tokio is mostly temporary and will be later replaced by a custom implementation
         let listener = TcpListener::from_std(socket.into())?;
 
         println!("started server on {}", address);
@@ -118,16 +115,13 @@ impl<'a> HTTPServer {
         // Process incoming requests
         // A separate thread processes all incoming requests
         // -> This thread then creates a new green thread for each of these
-        // -> -> This thread then matches the correct middlewares
-        // -> -> These are then send to the main thread using the mpsc queue (tx)
-        // New requests are then processed in the while loop below
-        // -> The correct middlewares are called and a respons is build
-        // -> -> The thread then returns the body to it's client
+        // -> -> This thread then matches the correct middlewares and calls them in the correct order
         let routes = self.routes.clone();
         let loglevel = self.loglevel.clone();
 
         loop {
             match listener.accept().await {
+                // non-blocking equivalent to socket.accept
                 Ok((socket, addr)) => {
                     // Spawn a new non-blocking, multithreaded task for each request
                     // (A task is essentially a green thread)
@@ -151,14 +145,14 @@ impl<'a> HTTPServer {
     // process incoming sockets
     async fn process_request(
         routes: Arc<Vec<Route>>,
-        mut socket: TcpStream,
+        mut socket: TcpStream, // Equivalent to Socket with some extra async methods
         _addr: SocketAddr,
         loglevel: LogLevel,
     ) -> Result<()> {
         let loglevel = loglevel as usize;
 
         // read request
-        // NOTE: readable might give a false positive, maybe add retry logic in the future
+        // NOTE: readable might give a false positive
         socket.readable().await?;
         let mut buffer = BytesMut::with_capacity(REQUEST_BUFFER_SIZE);
 
@@ -176,7 +170,6 @@ impl<'a> HTTPServer {
             HTTPServer::print_debug_request(&request.clone());
         }
 
-        // for middleware in self
         let relevant_middlewares: &mut Vec<(Route, RequestPath)> = &mut vec![];
         for route in routes.iter() {
             if route.method.is_some() && route.method != request.method {
@@ -191,9 +184,11 @@ impl<'a> HTTPServer {
         let mut response = http_response::ResponseBuilder::default();
         response.set_header("x-powered-by", "webserver-from-scratch");
 
-        let req = request.clone();
-        let resp = response.clone();
-        let ctx = Arc::new(Mutex::new(MiddlewareContext::new(req, resp, socket)));
+        // Since the borrow checker doesn't know that the ownership is given up inside the middleware, we sadly need to use a mutes.
+        // Theoretically we could use unsafe code instead (with safety guarantees) however I want to avoid that.
+        let ctx = Arc::new(Mutex::new(MiddlewareContext::new(
+            request, response, socket,
+        )));
 
         let mut err = false;
         for (middleware_route, middleware_path) in relevant_middlewares {
@@ -215,8 +210,6 @@ impl<'a> HTTPServer {
                 break;
             }
         }
-
-        let ctx = ctx.clone();
 
         if err {
             let mut ctx = ctx.lock();

@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, Bytes};
 
-use super::mask::apply_mask;
+// use super::mask::apply_mask;
 
 #[derive(Debug, Clone)]
 pub struct FrameHeader {
@@ -23,11 +23,11 @@ pub enum DataLength {
 }
 
 impl FrameHeader {
-    pub fn to_bytes(&self) -> BytesMut {
-        unimplemented!()
+    // pub fn to_bytes(&self) -> BytesMut {
+    //     unimplemented!()
 
-        // let mut buf = BytesMut::new();
-    }
+    //     // let mut buf = BytesMut::new();
+    // }
 
     pub fn from_bytes(buf: &mut Bytes) -> Result<Self> {
         if buf.len() < 2 {
